@@ -4,7 +4,6 @@ pragma solidity >=0.8.4;
 
 import {BridgeTestBase} from "./../../aztec/base/BridgeTestBase.sol";
 import {AztecTypes} from "rollup-encoder/libraries/AztecTypes.sol";
-
 import {ERC721PresetMinterPauserAutoId} from "@openzeppelin/contracts/token/ERC721/presets/ERC721PresetMinterPauserAutoId.sol";
 import {ErrorLib} from "../../../bridges/base/ErrorLib.sol";
 import {AddressRegistry} from "../../../bridges/registry/AddressRegistry.sol";
@@ -15,7 +14,8 @@ import {ZoraAsk} from "../../../bridges/zora/ZoraBridge.sol";
 contract ZoraUnitTest is BridgeTestBase {
     address private constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
     address private constant REGISTER_ADDRESS = address(0xdeadbeef);
-
+    uint256 private constant INTERACTION_NONCE = 84;
+    
     address private rollupProcessor;
 
     ZoraAsk private ask;
@@ -30,8 +30,8 @@ contract ZoraUnitTest is BridgeTestBase {
         AztecTypes.AztecAsset({id: 1, erc20Address: DAI, assetType: AztecTypes.AztecAssetType.ERC20});
     AztecTypes.AztecAsset private virtualAsset1 =
         AztecTypes.AztecAsset({id: 1, erc20Address: address(0), assetType: AztecTypes.AztecAssetType.VIRTUAL});
-    AztecTypes.AztecAsset private virtualAsset84 =
-        AztecTypes.AztecAsset({id: 84, erc20Address: address(0), assetType: AztecTypes.AztecAssetType.VIRTUAL});
+    AztecTypes.AztecAsset private virtualAssetInteractionNonce =
+        AztecTypes.AztecAsset({id: INTERACTION_NONCE, erc20Address: address(0), assetType: AztecTypes.AztecAssetType.VIRTUAL});
 
     // @dev This method exists on RollupProcessor.sol. It's defined here in order to be able to receive ETH like a real
     //      rollup processor would.
@@ -44,32 +44,27 @@ contract ZoraUnitTest is BridgeTestBase {
         // Initialize all contracts.
         registry = new AddressRegistry(rollupProcessor);
         ask = new ZoraAsk();
-        bridge = new ZoraBridge(rollupProcessor, address(ask), address(registry));        
+        bridge = new ZoraBridge(rollupProcessor, address(ask), address(registry));
 
-        // Get virtual assets.
-        registry.convert(
-            ethAsset,
-            emptyAsset,
-            virtualAsset1,
-            emptyAsset,
-            1, // _totalInputValue
-            0, // _interactionNonce
-            0, // _auxData
-            address(0x0)
-        );
+        // Create test NFT contract and mint 2 ERC-721 tokens (tokenIds 0 & 1).
+        nftContract = new ERC721PresetMinterPauserAutoId("test", "NFT", "");
+        // The owner is the bridge. Mint 2 so that we have a non-zero token id.
+        nftContract.mint(address(bridge)); // tokenID = 0
+        nftContract.mint(address(bridge)); // tokenID = 1
+
+        // Get virtual assets to use for registry.
+        registry.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 1, 0, 0, address(0x0));
         
+        // Register 0xdeadbeef, which we use as a fake customer address.
         uint256 inputAmount = uint160(address(REGISTER_ADDRESS));
-        // Register an address.
-        registry.convert(
-            virtualAsset1,
-            emptyAsset,
-            virtualAsset1,
-            emptyAsset,
-            inputAmount,
-            0, // _interactionNonce
-            0, // _auxData
-            address(0x0)
-        );
+        // 0 -> address(0xdeadbeef).
+        registry.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, inputAmount, 0, 0, address(0x0));
+
+        // Register the nftContract address. This is the collection of our fake
+        // NFTs.
+        inputAmount = uint160(address(nftContract));
+        // 1 -> address(nftContract).
+        registry.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, inputAmount, 0, 0, address(0x0));
     }
 
     // Revert test cases -- fillAsk.
@@ -107,38 +102,31 @@ contract ZoraUnitTest is BridgeTestBase {
 
     function testWithdrawAddressNotRegistered() public {
         // Successful fillAsk.
-        bridge.convert(
-            ethAsset, 
-            emptyAsset, 
-            virtualAsset1, 
-            emptyAsset,
-            0, 
-            virtualAsset1.id,
-            0, 
-            address(0)
-        );
+        testSuccessfulAskFill();
+
         // This auxData is out of range for the registry.
         uint64 auxData = uint64(registry.addressCount());
         vm.expectRevert(ErrorLib.InvalidAuxData.selector);
-        bridge.convert(virtualAsset1, emptyAsset, ethAsset, emptyAsset, 0, 0, auxData, address(0));
+        bridge.convert(virtualAssetInteractionNonce, emptyAsset, ethAsset, emptyAsset, 0, 0, auxData, address(0));
     }
 
     // Success test case -- fillAsk.
     function testSuccessfulAskFill() public {
-        uint32 tokenId = 1559;
-        uint32 collectionKey = 0;
+        uint32 tokenId = 1;
+        // The nftContract is registered with key=1.
+        uint32 collectionKey = 1;
+        // Construct auxData.
         uint64 auxData = (uint64(tokenId) << 32) | uint64(collectionKey);
         uint256 inputValue = 2000;
-        uint256 interactionNonce = 84;
 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
-            ethAsset, 
-            emptyAsset, 
-            virtualAsset1, 
-            emptyAsset, 
-            inputValue, 
-            interactionNonce, 
-            auxData, 
+            ethAsset,
+            emptyAsset,
+            virtualAsset1,
+            emptyAsset,
+            inputValue,
+            INTERACTION_NONCE,
+            auxData,
             address(0)
         );
 
@@ -148,57 +136,25 @@ contract ZoraUnitTest is BridgeTestBase {
         assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
 
         // Check that the internal nftAssets mapping is updated.
-        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(interactionNonce);
-        assertEq(storedCollection, REGISTER_ADDRESS, "Unexpected collection address");
+        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
+        assertEq(storedCollection, address(nftContract), "Unexpected collection address");
         assertEq(storedTokenId, tokenId, "Unexpected tokenId");
     }
 
     // Success test case -- withdraw.
     function testSuccessfulWithdraw() public {
-        uint32 tokenId = 0;
-        uint32 collectionKey = 1;
-        uint64 auxData = (uint64(tokenId) << 32) | uint64(collectionKey);
-        uint256 inputValue = 2000;
-        uint256 interactionNonce = 84;
-
-        // Create test NFTS.
-        nftContract = new ERC721PresetMinterPauserAutoId("test", "NFT", "");
-        nftContract.mint(address(bridge));
-
-        uint256 inputAmount = uint160(address(nftContract));
-        // Register the NFT collection address. This will have index=1.
-        registry.convert(
-            virtualAsset1,
-            emptyAsset,
-            virtualAsset1,
-            emptyAsset,
-            inputAmount,
-            0, // _interactionNonce
-            0, // _auxData
-            address(0x0)
-        );
-        
-        // First fill an ask.
-        bridge.convert(
-            ethAsset, 
-            emptyAsset, 
-            virtualAsset1, 
-            emptyAsset, 
-            inputValue, 
-            interactionNonce, 
-            auxData, 
-            address(0)
-        );
+        // Successful fillAsk.
+        testSuccessfulAskFill();
 
         // Then withdraw. 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
-            virtualAsset84, 
-            emptyAsset, 
-            ethAsset, 
-            emptyAsset, 
-            0, // inputValue 
-            0, // inputValue 
-            0, // auxData
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            ethAsset,
+            emptyAsset,
+            0, // _totalInputValue 
+            0, // _interactionNonce 
+            0, // _auxData -> withdraw to 0xdeadbeef
             address(0)
         );
 
@@ -208,7 +164,7 @@ contract ZoraUnitTest is BridgeTestBase {
         assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
 
         // Check that the internal nftAssets mapping is deleted.
-        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(interactionNonce);
+        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
         assertEq(storedCollection, address(0), "Unexpected collection address");
         assertEq(storedTokenId, 0, "Unexpected tokenId");
     }
