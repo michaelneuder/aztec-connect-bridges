@@ -98,9 +98,10 @@ contract ZoraBridgeE2ETest is BridgeTestBase {
 
     // Success test case -- fillAsk.
     function testFillAsk() public {
+        uint64 funcSelector = 4;
         // The nftContract is registered with key=1.
-        uint32 collectionKey = 1;
-        uint64 auxData = (TOKEN_ID << 32) | uint64(collectionKey);
+        uint64 collectionKey = 1;
+        uint64 auxData = (TOKEN_ID << 34) | (collectionKey << 4) | funcSelector;
 
         // Get the current interaction nonce. This is the id of the virtual
         // token that is created during fillAsk.
@@ -127,6 +128,12 @@ contract ZoraBridgeE2ETest is BridgeTestBase {
         // Successful fillAsk.
         testFillAsk();
 
+        uint64 funcSelector = 1;
+        // The output address is registered with key=0.
+        uint64 registryKey = 0;
+        // Construct auxData.
+        uint64 auxData = (registryKey << 4) | funcSelector;
+
         AztecTypes.AztecAsset memory virtualAssetInteractionNonce = AztecTypes.AztecAsset({
             id: interactionNonce, 
             erc20Address: address(0), 
@@ -136,7 +143,7 @@ contract ZoraBridgeE2ETest is BridgeTestBase {
         // TODO(mikeneuder) expect an emit here
         // Then withdraw.
         ROLLUP_ENCODER.defiInteractionL2(
-            id, virtualAssetInteractionNonce, emptyAsset, ethAsset, emptyAsset, 0, 1
+            id, virtualAssetInteractionNonce, emptyAsset, ethAsset, emptyAsset, auxData, 1
         );
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = ROLLUP_ENCODER.processRollupAndGetBridgeResult();
         address owner = nftContract.ownerOf(TOKEN_ID);
