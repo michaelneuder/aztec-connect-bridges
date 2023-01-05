@@ -37,10 +37,6 @@ contract ZoraBridge is BridgeBase {
         registry = AddressRegistry(_registry);
     }
 
-    event Debug (
-        uint256 auxData
-    );
-
     // Converts ETH into a virtual token by filling an ask on the Zora contract.
     function convert(
         AztecTypes.AztecAsset calldata _inputAssetA,
@@ -118,10 +114,6 @@ contract ZoraBridge is BridgeBase {
             }
 
             address to = registry.addresses(_auxData >> 4);
-            emit Debug(
-                _auxData >> 4
-            );
-            
             if (to == address(0x0)) {
                 revert ErrorLib.InvalidAuxData();
             }
