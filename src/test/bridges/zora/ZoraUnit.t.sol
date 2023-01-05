@@ -87,36 +87,44 @@ contract ZoraUnitTest is BridgeTestBase {
     }
 
     function testCollectionAddressNotRegistered() public {
-        // This auxData is out of range for the registry.
-        uint64 auxData = uint64(registry.addressCount());
+        uint64 funcSelector = 4;
+        // This collection is out of range for the registry.
+        uint64 collectionKey = uint64(registry.addressCount());
+        uint64 auxData = (collectionKey << 4) | funcSelector;
         vm.expectRevert(ErrorLib.InvalidAuxData.selector);
         bridge.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 0, 0, auxData, address(0));
     }
 
     // Revert test cases -- withdraw.
     function testInvalidVirtualTokenId() public {
+        uint64 funcSelector = 1;
         vm.expectRevert(ErrorLib.InvalidInputA.selector);
         // No NFTs in the bridge.
-        bridge.convert(virtualAsset1, emptyAsset, ethAsset, emptyAsset, 0, 0, 0, address(0));
+        bridge.convert(virtualAsset1, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
     }
 
     function testWithdrawAddressNotRegistered() public {
         // Successful fillAsk.
         testSuccessfulAskFill();
 
+        uint64 funcSelector = 1;
         // This auxData is out of range for the registry.
-        uint64 auxData = uint64(registry.addressCount());
+        uint64 registryKey = uint64(registry.addressCount());
+        // Construct auxData.
+        uint64 auxData = (registryKey << 4) | funcSelector;
         vm.expectRevert(ErrorLib.InvalidAuxData.selector);
         bridge.convert(virtualAssetInteractionNonce, emptyAsset, ethAsset, emptyAsset, 0, 0, auxData, address(0));
     }
 
     // Success test case -- fillAsk.
     function testSuccessfulAskFill() public {
-        uint32 tokenId = 1;
+        uint64 funcSelector = 4;
+        uint64 tokenId = 1;
         // The nftContract is registered with key=1.
-        uint32 collectionKey = 1;
+        uint64 collectionKey = 1;
         // Construct auxData.
-        uint64 auxData = (uint64(tokenId) << 32) | uint64(collectionKey);
+        uint64 auxData = (tokenId << 34) | (collectionKey << 4) | funcSelector;
+
         uint256 inputValue = 2000;
 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
@@ -143,6 +151,12 @@ contract ZoraUnitTest is BridgeTestBase {
 
     // Success test case -- withdraw.
     function testSuccessfulWithdraw() public {
+        uint64 funcSelector = 1;
+        // The output address is registered with key=0.
+        uint64 registryKey = 0;
+        // Construct auxData.
+        uint64 auxData = (registryKey << 4) | funcSelector;
+
         // Successful fillAsk.
         testSuccessfulAskFill();
 
@@ -152,9 +166,9 @@ contract ZoraUnitTest is BridgeTestBase {
             emptyAsset,
             ethAsset,
             emptyAsset,
-            0, // _totalInputValue 
-            0, // _interactionNonce 
-            0, // _auxData -> withdraw to 0xdeadbeef
+            0,       // _totalInputValue 
+            0,       // _interactionNonce 
+            auxData, // _auxData -> withdraw to 0xdeadbeef
             address(0)
         );
 

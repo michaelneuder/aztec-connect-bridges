@@ -37,6 +37,10 @@ contract ZoraBridge is BridgeBase {
         registry = AddressRegistry(_registry);
     }
 
+    event Debug (
+        uint256 auxData
+    );
+
     // Converts ETH into a virtual token by filling an ask on the Zora contract.
     function convert(
         AztecTypes.AztecAsset calldata _inputAssetA,
@@ -57,15 +61,94 @@ contract ZoraBridge is BridgeBase {
             _outputAssetA.assetType == AztecTypes.AztecAssetType.ERC20
         ) revert ErrorLib.InvalidOutputA();
 
+        /* 
+            This contract supports a number of operations. The user indicates
+            what function they want to call by using function selector codes.
+            Below are the operations we support and the function selector for
+            each. The 4 least-significant bits of the aux data will be
+            interpreted as the function selector. The remaining bits of the aux 
+            data will be used for additional data specified in each function. 
 
-        if (_inputAssetA.assetType == AztecTypes.AztecAssetType.ETH &&
-            _outputAssetA.assetType == AztecTypes.AztecAssetType.VIRTUAL) {
+            NOTE: We cast the function selector to a uint8 because that is the
+            smallest integer size supported. We LAND the bits with 0xf so that
+            we only consider the four least-significant bits.
 
-            // Split _auxData into halves. 
-            // First half is used to get the collection address from the registry.
-            // Second half is the tokenId.
-            uint256 collectionKey = _auxData & 0xffffffff;
-            uint256 tokenId = _auxData >> 32;
+            Basic:
+              -- deposit       funcSelector = uint8(0)
+              -- withdraw      funcSelector = uint8(1)
+
+            Zora Asks: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1
+              -- createAsk     funcSelector = uint8(2)
+              -- cancelAsk     funcSelector = uint8(3)
+              -- fillAsk       funcSelector = uint8(4)
+
+            Zora Ethereum Auction: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH
+              -- createAuction funcSelector = uint8(5)
+              -- cancelAuction funcSelector = uint8(6)
+              -- settleAuction funcSelector = uint8(7)
+              -- createBid     funcSelector = uint8(8)
+
+            Zora Offers: https://docs.zora.co/docs/smart-contracts/modules/Offers/zora-v3-offers-latest
+              -- createOffer   funcSelector = uint8(9)
+        */
+
+        uint8 funcSelector = uint8(_auxData & 0xf);
+
+        /* 
+            withdraw
+          
+            _auxData = 
+                bits[0-4)   = funcSelector
+                bits[4-64)  = registryKey
+        */ 
+        if (funcSelector == 1) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be ETH.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[_inputAssetA.id];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+
+            address to = registry.addresses(_auxData >> 4);
+            emit Debug(
+                _auxData >> 4
+            );
+            
+            if (to == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+            delete nftAssets[_inputAssetA.id];
+            IERC721(token.collection).transferFrom(address(this), to, token.tokenId);
+            return (0, 0, false);
+        }
+        /* 
+            fillAsk: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#fillask
+          
+            _auxData = 
+                bits[0-4)   = funcSelector
+                bits[4-34)  = collectionKey
+                bits[34-64) = tokenId
+        */ 
+        else if (funcSelector == 4) {
+            // Input type needs to be ETH.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            uint256 collectionKey = (_auxData >> 4) & 0x3fffffff;
+            uint256 tokenId = _auxData >> 34;
 
             address collection = registry.addresses(collectionKey);
             if (collection == address(0x0)) {
@@ -88,23 +171,8 @@ contract ZoraBridge is BridgeBase {
 
             // Return the virtual token.
             return (1, 0, false);
-        } else if (
-            _inputAssetA.assetType == AztecTypes.AztecAssetType.VIRTUAL &&
-            _outputAssetA.assetType == AztecTypes.AztecAssetType.ETH
-        ) {
-            // Fetch the NFT details from the mapping using the virtual token id as the key.
-            NftAsset memory token = nftAssets[_inputAssetA.id];
-            if (token.collection == address(0x0)) {
-                revert ErrorLib.InvalidInputA();
-            }
-
-            address to = registry.addresses(_auxData);
-            if (to == address(0x0)) {
-                revert ErrorLib.InvalidAuxData();
-            }
-            delete nftAssets[_inputAssetA.id];
-            IERC721(token.collection).transferFrom(address(this), to, token.tokenId);
-            return (0, 0, false);
+        } else {
+            revert ErrorLib.InvalidAuxData();
         }
     }
 }
