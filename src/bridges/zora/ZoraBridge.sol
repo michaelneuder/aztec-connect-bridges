@@ -8,8 +8,17 @@ import {ErrorLib} from "../base/ErrorLib.sol";
 import {BridgeBase} from "../base/BridgeBase.sol";
 import {AddressRegistry} from "../registry/AddressRegistry.sol";
 
-// Get function definition from: https://github.com/ourzora/v3/blob/1d4c0c951ccd5c1d446283ce6fef3757ad97b804/contracts/modules/Asks/V1.1/AsksV1_1.sol#L302.
+// Get function definition from: https://github.com/ourzora/v3/blob/1d4c0c951ccd5c1d446283ce6fef3757ad97b804/contracts/modules/Asks/V1.1/AsksV1_1.sol.
 contract ZoraAsk {
+    function createAsk(
+        address _tokenContract,
+        uint256 _tokenId,
+        uint256 _askPrice,
+        address _askCurrency,
+        address _sellerFundsRecipient,
+        uint16 _findersFeeBps
+    ) external {}
+
     function fillAsk(
         address _tokenContract,
         uint256 _tokenId,
@@ -30,6 +39,10 @@ contract ZoraBridge is BridgeBase {
     // Other contracts.
     ZoraAsk internal za;
     AddressRegistry public immutable registry;
+
+    // Constants
+    uint64 internal constant MASK_4  = 0xf;
+    uint64 internal constant MASK_30 = 0x3fffffff;
 
     // Need to pass the zora & registry addresses to construct the bridge.
     constructor(address _rollupProcessor, address _zora, address _registry) BridgeBase(_rollupProcessor) {
@@ -92,7 +105,7 @@ contract ZoraBridge is BridgeBase {
               -- createOffer   funcSelector = uint8(9)
         */
 
-        uint8 funcSelector = uint8(_auxData & 0xf);
+        uint8 funcSelector = uint8(_auxData & MASK_4);
 
         /* 
             withdraw
@@ -130,6 +143,49 @@ contract ZoraBridge is BridgeBase {
             return (0, 0, false);
         }
         /* 
+            createAsk: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#createask
+          
+            _auxData = 
+                bits[0-4)   = funcSelector
+                bits[4-34)  = askPrice
+                bits[34-64) = registryKey
+        */ 
+        else if (funcSelector == 2) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be ETH.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[_inputAssetA.id];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+
+            // Parse auxData.
+            uint256 askPrice = (_auxData >> 4) & MASK_30;
+            uint256 registryKey = _auxData >> 34;
+
+            address sellerFundsRecipient = registry.addresses(registryKey);
+            if (sellerFundsRecipient == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+
+            za.createAsk(
+                token.collection,
+                token.tokenId,
+                askPrice,
+                address(0x0),         // 0 address to indicate this ask is in ETH.
+                sellerFundsRecipient,
+                0                     // Leave the finder fee as 0.
+            );
+            return (0, 0, false);
+        }
+        /* 
             fillAsk: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#fillask
           
             _auxData = 
@@ -147,7 +203,7 @@ contract ZoraBridge is BridgeBase {
                 revert ErrorLib.InvalidOutputA();
             }
 
-            uint256 collectionKey = (_auxData >> 4) & 0x3fffffff;
+            uint256 collectionKey = (_auxData >> 4) & MASK_30;
             uint256 tokenId = _auxData >> 34;
 
             address collection = registry.addresses(collectionKey);
