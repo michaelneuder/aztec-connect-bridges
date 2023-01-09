@@ -50,10 +50,6 @@ contract ZoraBridge is BridgeBase {
         registry = AddressRegistry(_registry);
     }
 
-    event Debug (
-        uint256 auxData
-    );
-
     // Converts ETH into a virtual token by filling an ask on the Zora contract.
     function convert(
         AztecTypes.AztecAsset calldata _inputAssetA,
@@ -131,10 +127,6 @@ contract ZoraBridge is BridgeBase {
             }
 
             address to = registry.addresses(_auxData >> 4);
-            emit Debug(
-                _auxData >> 4
-            );
-            
             if (to == address(0x0)) {
                 revert ErrorLib.InvalidAuxData();
             }
@@ -155,26 +147,27 @@ contract ZoraBridge is BridgeBase {
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
             }
-            // Output type needs to be ETH.
-            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidOutputA();
             }
 
+            uint256 inputAssetId = _inputAssetA.id;
+
             // Fetch the NFT details from the mapping using the virtual token id as the key.
-            NftAsset memory token = nftAssets[_inputAssetA.id];
+            NftAsset memory token = nftAssets[inputAssetId];
             if (token.collection == address(0x0)) {
                 revert ErrorLib.InvalidInputA();
             }
 
             // Parse auxData.
-            uint256 askPrice = (_auxData >> 4) & MASK_30;
-            uint256 registryKey = _auxData >> 34;
-
-            address sellerFundsRecipient = registry.addresses(registryKey);
+            uint256 askPrice = (_auxData >> 4) & MASK_30; 
+            address sellerFundsRecipient = registry.addresses(_auxData >> 34);
             if (sellerFundsRecipient == address(0x0)) {
                 revert ErrorLib.InvalidAuxData();
             }
 
+            // Call external zora contract.
             za.createAsk(
                 token.collection,
                 token.tokenId,
@@ -183,7 +176,13 @@ contract ZoraBridge is BridgeBase {
                 sellerFundsRecipient,
                 0                     // Leave the finder fee as 0.
             );
-            return (0, 0, false);
+            
+            // Update the asset map to correlate new virtual token with existing
+            // bridge-owned nft.
+            nftAssets[_interactionNonce] = token;
+            delete nftAssets[inputAssetId];
+
+            return (1, 0, false);
         }
         /* 
             fillAsk: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#fillask
