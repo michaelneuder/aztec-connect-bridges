@@ -26,6 +26,8 @@ contract ZoraAsk {
         uint256 _fillAmount,
         address _finder
     ) external {}
+
+    function cancelAsk(address _tokenContract, uint256 _tokenId) external {}
 }
 
 contract ZoraBridge is BridgeBase {
@@ -179,8 +181,41 @@ contract ZoraBridge is BridgeBase {
             
             // Update the asset map to correlate new virtual token with existing
             // bridge-owned nft.
-            nftAssets[_interactionNonce] = token;
-            delete nftAssets[inputAssetId];
+            _updateVirtualAssetId(inputAssetId, _interactionNonce);
+
+            return (1, 0, false);
+        }
+        /* 
+            cancel: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#cancelask
+          
+            _auxData = 
+                bits[0-4)   = funcSelector
+                bits[4-64)  = unused 
+        */ 
+        else if (funcSelector == 3) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            uint256 inputAssetId = _inputAssetA.id;
+
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[inputAssetId];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+
+            // Call external zora contract.
+            za.cancelAsk(token.collection, token.tokenId);
+            
+            // Update the asset map to correlate new virtual token with existing
+            // bridge-owned nft.
+            _updateVirtualAssetId(inputAssetId, _interactionNonce);
 
             return (1, 0, false);
         }
@@ -229,5 +264,11 @@ contract ZoraBridge is BridgeBase {
         } else {
             revert ErrorLib.InvalidAuxData();
         }
+    }
+
+    // Function to update the nftAssets mapping to a new virtual asset id.
+    function _updateVirtualAssetId(uint256 _inputAssetId, uint256 _interactionNonce) internal {
+        nftAssets[_interactionNonce] = nftAssets[_inputAssetId];
+        delete nftAssets[_inputAssetId];
     }
 }

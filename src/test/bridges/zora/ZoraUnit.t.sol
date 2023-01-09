@@ -256,6 +256,68 @@ contract ZoraUnitTest is BridgeTestBase {
     /*  
         function   |   selector
         --------------------------------------
+        cancelAsk  |   uint8(3)
+    */
+ 
+    // Revert test cases.
+    function testCancelAskInvalidInputAType() public {
+        uint64 funcSelector = 3;
+        vm.expectRevert(ErrorLib.InvalidInputA.selector);
+        // Input A needs to be virtual type.
+        bridge.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testCancelAskInvalidOutputAType() public {
+        uint64 funcSelector = 3;
+        vm.expectRevert(ErrorLib.InvalidOutputA.selector);
+        // Output A needs to be virtual type.
+        bridge.convert(virtualAsset1, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testCancelAskInvalidCollectionAddress() public {
+        uint64 funcSelector = 3;
+        // No NFTs in the bridge, so fetching collection address fails.
+        vm.expectRevert(ErrorLib.InvalidInputA.selector);
+        bridge.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    // Success test case.
+    function testCancelAskSuccess() public {
+       uint64 funcSelector = 3;
+
+         // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
+        testFillAskSuccess();
+
+        // Then withdraw. 
+        (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            0,                      // _totalInputValue 
+            INTERACTION_NONCE + 1,  // use next nonce to update mapping.
+            funcSelector,
+            address(0)
+        );
+
+        // Check outputs.
+        assertEq(outputValueA, 1, "Output value A is not 0");
+        assertEq(outputValueB, 0, "Output value B is not 0");
+        assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
+
+        // Check that the internal nftAssets mapping is updated.
+        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
+        assertEq(storedCollection, address(0), "Unexpected collection address");
+        assertEq(storedTokenId, 0, "Unexpected tokenId");
+
+        (storedCollection, storedTokenId) = bridge.nftAssets(INTERACTION_NONCE+1);
+        assertEq(storedCollection, address(nftContract), "Unexpected collection address");
+        assertEq(storedTokenId, TOKEN_ID, "Unexpected tokenId");
+    }
+
+    /*  
+        function   |   selector
+        --------------------------------------
         fillAsk    |   uint8(4)
     */
 
