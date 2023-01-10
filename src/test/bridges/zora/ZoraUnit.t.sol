@@ -50,13 +50,11 @@ contract ZoraUnitTest is BridgeTestBase {
 
         // Create test NFT contract and mint 2 ERC-721 tokens (tokenIds 0 & 1).
         nftContract = new ERC721PresetMinterPauserAutoId("test", "NFT", "");
-        // The owner is the bridge. Mint 2 so that we have a non-zero token id.
-        nftContract.mint(address(bridge)); // tokenID = 0
-        nftContract.mint(address(bridge)); // tokenID = 1
-
-        // Mint one to the test contract for depositing.
-        nftContract.mint(address(this)); // tokenID = 2
-        nftContract.approve(address(bridge), 2);
+        // The owner is the bridge. Mint 2 to have a non-zero token id.
+        nftContract.mint(address(this)); // tokenID = 0
+        nftContract.mint(address(this)); // tokenID = 1
+        nftContract.approve(address(bridge), 0);
+        nftContract.approve(address(bridge), 1);
 
         // Get virtual assets to use for registry.
         registry.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 1, 0, 0, address(0x0));
@@ -71,6 +69,25 @@ contract ZoraUnitTest is BridgeTestBase {
         inputAmount = uint160(address(nftContract));
         // 1 -> address(nftContract).
         registry.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, inputAmount, 0, 0, address(0x0));
+    }
+
+    function depositIntoBridge(uint256 _virtualAssetId, uint256 _tokenId) internal {
+        uint64 funcSelector = 0;
+
+        // Deposit. 
+        bridge.convert(
+            ethAsset,
+            emptyAsset,
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            0,                  // _totalInputValue 
+            _virtualAssetId,    // _interactionNonce 
+            funcSelector,       // auxData
+            address(0)
+        );
+
+        // Call match and pull with tokenId.
+        bridge.matchAndPull(_virtualAssetId, address(nftContract), _tokenId);
     }
 
     // Misc unit tests.
@@ -140,16 +157,16 @@ contract ZoraUnitTest is BridgeTestBase {
         assertEq(outputValueB, 0, "Output value B is not 0");
         assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
 
-        // Call match and pull with tokenId = 2.
-        bridge.matchAndPull(INTERACTION_NONCE, address(nftContract), 2);
+        // Call match and pull with tokenId = 1.
+        bridge.matchAndPull(INTERACTION_NONCE, address(nftContract), 1);
 
         // Check that owner is now the bridge.
-        assertEq(IERC721(address(nftContract)).ownerOf(2), address(bridge));
+        assertEq(IERC721(address(nftContract)).ownerOf(1), address(bridge));
 
         // Check that the internal nftAssets mapping is updated.
         (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
         assertEq(storedCollection, address(nftContract), "Unexpected collection address");
-        assertEq(storedTokenId, 2, "Unexpected tokenId");
+        assertEq(storedTokenId, 1, "Unexpected tokenId");
     }
 
     /*  
@@ -181,8 +198,7 @@ contract ZoraUnitTest is BridgeTestBase {
     }
 
     function testWithdrawAddressNotRegistered() public {
-        // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
-        testFillAskSuccess();
+        depositIntoBridge(INTERACTION_NONCE, 1);
 
         uint64 funcSelector = 1;
         // This registryKey is out of range for the registry.
@@ -201,8 +217,7 @@ contract ZoraUnitTest is BridgeTestBase {
         // Construct auxData.
         uint64 auxData = (registryKey << 4) | funcSelector;
 
-         // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
-        testFillAskSuccess();
+        depositIntoBridge(INTERACTION_NONCE, 1);
 
         // Then withdraw. 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
@@ -260,8 +275,7 @@ contract ZoraUnitTest is BridgeTestBase {
     }
 
     function testCreateAskInvalidRecipient() public {
-        // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
-        testFillAskSuccess();
+        depositIntoBridge(INTERACTION_NONCE, 1);
 
         uint64 funcSelector = 2;
         // This registryKey is out of range for the registry.
@@ -275,14 +289,13 @@ contract ZoraUnitTest is BridgeTestBase {
 
     // Success test case.
     function testCreateAskSuccess() public {
-       uint64 funcSelector = 2;
+        uint64 funcSelector = 2;
         // The output address is registered with key=0.
         uint64 registryKey = 0;
         // Construct auxData.
         uint64 auxData = (registryKey << 34) | funcSelector;
 
-         // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
-        testFillAskSuccess();
+        depositIntoBridge(INTERACTION_NONCE, 1);
 
         // Then withdraw. 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
@@ -341,10 +354,8 @@ contract ZoraUnitTest is BridgeTestBase {
 
     // Success test case.
     function testCancelAskSuccess() public {
-       uint64 funcSelector = 3;
-
-         // TODO(mikeneuder): probably replace with a simple deposit once that is implemented.
-        testFillAskSuccess();
+        uint64 funcSelector = 3;
+        depositIntoBridge(INTERACTION_NONCE, 1);
 
         // Then withdraw. 
         (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
