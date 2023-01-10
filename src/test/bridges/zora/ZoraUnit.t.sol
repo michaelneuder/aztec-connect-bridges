@@ -54,6 +54,10 @@ contract ZoraUnitTest is BridgeTestBase {
         nftContract.mint(address(bridge)); // tokenID = 0
         nftContract.mint(address(bridge)); // tokenID = 1
 
+        // Mint one to the test contract for depositing.
+        nftContract.mint(address(this)); // tokenID = 2
+        nftContract.approve(address(bridge), 2);
+
         // Get virtual assets to use for registry.
         registry.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 1, 0, 0, address(0x0));
         
@@ -92,6 +96,60 @@ contract ZoraUnitTest is BridgeTestBase {
         uint64 funcSelector = 15; // func selector doesn't exist.
         vm.expectRevert(ErrorLib.InvalidAuxData.selector);
         bridge.convert(ethAsset, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    /*  
+        function   |   selector
+        --------------------------------------
+        deposit    |   uint8(0)
+    */
+
+    // Revert test cases.
+    function testDepositInvalidInputAType() public {
+        uint64 funcSelector = 0;
+        vm.expectRevert(ErrorLib.InvalidInputA.selector);
+        // Input A needs to be eth type.
+        bridge.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testDepositInvalidOutputAType() public {
+        uint64 funcSelector = 0;
+        vm.expectRevert(ErrorLib.InvalidOutputA.selector);
+        // Output A needs to be virtual type.
+        bridge.convert(ethAsset, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    // Success test case.
+    function testDepositSuccess() public {
+        uint64 funcSelector = 0;
+
+        // Deposit. 
+        (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
+            ethAsset,
+            emptyAsset,
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            0,                  // _totalInputValue 
+            INTERACTION_NONCE,  // _interactionNonce 
+            funcSelector,       // auxData
+            address(0)
+        );
+
+        // Check outputs.
+        assertEq(outputValueA, 1, "Output value A is not 0");
+        assertEq(outputValueB, 0, "Output value B is not 0");
+        assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
+
+        // Call match and pull with tokenId = 2.
+        bridge.matchAndPull(INTERACTION_NONCE, address(nftContract), 2);
+
+        // Check that owner is now the bridge.
+        assertEq(IERC721(address(nftContract)).ownerOf(2), address(bridge));
+
+        // Check that the internal nftAssets mapping is updated.
+        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
+        assertEq(storedCollection, address(nftContract), "Unexpected collection address");
+        assertEq(storedTokenId, 2, "Unexpected tokenId");
     }
 
     /*  
