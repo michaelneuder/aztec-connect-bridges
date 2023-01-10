@@ -38,6 +38,8 @@ contract ZoraBridge is BridgeBase {
     // Holds the VIRTUAL token -> NFT relationship.
     mapping(uint256 => NftAsset) public nftAssets;
 
+    error InvalidVirtualAssetId();
+
     // Other contracts.
     ZoraAsk internal za;
     AddressRegistry public immutable registry;
@@ -106,6 +108,26 @@ contract ZoraBridge is BridgeBase {
         uint8 funcSelector = uint8(_auxData & MASK_4);
 
         /* 
+            deposit
+          
+            _auxData = 
+                bits[0-4)   = funcSelector
+                bits[4-64)  = unused
+        */ 
+        if (funcSelector == 0) {
+            // Input type needs to be ETH.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            // Send back a virtual asset.
+            return (1, 0, false);
+        }
+        /* 
             withdraw
           
             _auxData = 
@@ -154,10 +176,8 @@ contract ZoraBridge is BridgeBase {
                 revert ErrorLib.InvalidOutputA();
             }
 
-            uint256 inputAssetId = _inputAssetA.id;
-
             // Fetch the NFT details from the mapping using the virtual token id as the key.
-            NftAsset memory token = nftAssets[inputAssetId];
+            NftAsset memory token = nftAssets[_inputAssetA.id];
             if (token.collection == address(0x0)) {
                 revert ErrorLib.InvalidInputA();
             }
@@ -181,7 +201,7 @@ contract ZoraBridge is BridgeBase {
             
             // Update the asset map to correlate new virtual token with existing
             // bridge-owned nft.
-            _updateVirtualAssetId(inputAssetId, _interactionNonce);
+            _updateVirtualAssetId(_inputAssetA.id, _interactionNonce);
 
             return (1, 0, false);
         }
@@ -202,10 +222,8 @@ contract ZoraBridge is BridgeBase {
                 revert ErrorLib.InvalidOutputA();
             }
 
-            uint256 inputAssetId = _inputAssetA.id;
-
             // Fetch the NFT details from the mapping using the virtual token id as the key.
-            NftAsset memory token = nftAssets[inputAssetId];
+            NftAsset memory token = nftAssets[_inputAssetA.id];
             if (token.collection == address(0x0)) {
                 revert ErrorLib.InvalidInputA();
             }
@@ -215,7 +233,7 @@ contract ZoraBridge is BridgeBase {
             
             // Update the asset map to correlate new virtual token with existing
             // bridge-owned nft.
-            _updateVirtualAssetId(inputAssetId, _interactionNonce);
+            _updateVirtualAssetId(_inputAssetA.id, _interactionNonce);
 
             return (1, 0, false);
         }
@@ -264,6 +282,19 @@ contract ZoraBridge is BridgeBase {
         } else {
             revert ErrorLib.InvalidAuxData();
         }
+    }
+
+    // Function to match a virtual token id with an NFT and transfer the ownership to the bridge.
+    function matchAndPull(uint256 _virtualAssetId, address _collection, uint256 _tokenId) external {
+        // Virtual token already associated with a different ERC-721 in the mapping.
+        if (nftAssets[_virtualAssetId].collection != address(0x0)) {
+            revert InvalidVirtualAssetId();
+        }
+        nftAssets[_virtualAssetId] = NftAsset({
+            collection: _collection,
+            tokenId: _tokenId
+        });
+        IERC721(_collection).transferFrom(msg.sender, address(this), _tokenId);
     }
 
     // Function to update the nftAssets mapping to a new virtual asset id.
