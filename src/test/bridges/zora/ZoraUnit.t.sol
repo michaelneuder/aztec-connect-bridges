@@ -10,6 +10,7 @@ import {ErrorLib} from "../../../bridges/base/ErrorLib.sol";
 import {AddressRegistry} from "../../../bridges/registry/AddressRegistry.sol";
 import {ZoraBridge} from "../../../bridges/zora/ZoraBridge.sol";
 import {ZoraAsk} from "../../../bridges/zora/ZoraBridge.sol";
+import {ZoraAuction} from "../../../bridges/zora/ZoraBridge.sol";
 
 // @notice The purpose of this test is to directly test convert functionality of the bridge.
 contract ZoraUnitTest is BridgeTestBase {
@@ -21,6 +22,7 @@ contract ZoraUnitTest is BridgeTestBase {
     address private rollupProcessor;
 
     ZoraAsk private ask;
+    ZoraAuction private auction;
     ZoraBridge private bridge;
     AddressRegistry private registry;
     ERC721PresetMinterPauserAutoId private nftContract;
@@ -46,7 +48,8 @@ contract ZoraUnitTest is BridgeTestBase {
         // Initialize all contracts.
         registry = new AddressRegistry(rollupProcessor);
         ask = new ZoraAsk();
-        bridge = new ZoraBridge(rollupProcessor, address(ask), address(registry));
+        auction = new ZoraAuction();
+        bridge = new ZoraBridge(rollupProcessor, address(ask), address(auction), address(registry));
 
         // Create test NFT contract and mint 2 ERC-721 tokens (tokenIds 0 & 1).
         nftContract = new ERC721PresetMinterPauserAutoId("test", "NFT", "");
@@ -69,25 +72,6 @@ contract ZoraUnitTest is BridgeTestBase {
         inputAmount = uint160(address(nftContract));
         // 1 -> address(nftContract).
         registry.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, inputAmount, 0, 0, address(0x0));
-    }
-
-    function depositIntoBridge(uint256 _virtualAssetId, uint256 _tokenId) internal {
-        uint64 funcSelector = 0;
-
-        // Deposit. 
-        bridge.convert(
-            ethAsset,
-            emptyAsset,
-            virtualAssetInteractionNonce,
-            emptyAsset,
-            0,                  // _totalInputValue 
-            _virtualAssetId,    // _interactionNonce 
-            funcSelector,       // auxData
-            address(0)
-        );
-
-        // Call match and pull with tokenId.
-        bridge.matchAndPull(_virtualAssetId, address(nftContract), _tokenId);
     }
 
     // Misc unit tests.
@@ -390,7 +374,7 @@ contract ZoraUnitTest is BridgeTestBase {
         fillAsk    |   uint8(4)
     */
 
-    // Revert test casea.
+    // Revert test cases.
     function testFillAskInvalidInputAType() public {
         uint64 funcSelector = 4;
         vm.expectRevert(ErrorLib.InvalidInputA.selector);
@@ -444,5 +428,97 @@ contract ZoraUnitTest is BridgeTestBase {
         (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
         assertEq(storedCollection, address(nftContract), "Unexpected collection address");
         assertEq(storedTokenId, TOKEN_ID, "Unexpected tokenId");
+    }
+
+    /*  
+        function         |   selector
+        --------------------------------------
+        createAutction   |   uint8(5)
+    */
+
+    // Revert test cases.
+    function testCreateAuctionInvalidInputAType() public {
+        uint64 funcSelector = 5;
+        vm.expectRevert(ErrorLib.InvalidInputA.selector);
+        // Input A needs to be virtual type.
+        bridge.convert(ethAsset, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testCreateAuctionInvalidOutputAType() public {
+        uint64 funcSelector = 5;
+        vm.expectRevert(ErrorLib.InvalidOutputA.selector);
+        // Output A needs to be virtual type.
+        bridge.convert(virtualAsset1, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testCreateAuctionNoNFTPresent() public {
+        uint64 funcSelector = 5;
+        // Virtual asset not associated with an NFT in the bridge.
+        vm.expectRevert(ErrorLib.InvalidInputA.selector);
+        bridge.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, 0, 0, funcSelector, address(0));
+    }
+
+    function testCreateAuctionAddressNotRegistered() public {
+        uint64 funcSelector = 5;
+        // Deposit an NFT. 
+        depositIntoBridge(INTERACTION_NONCE, 1);
+
+        // Address registry key out of range.
+        uint64 registryKey = uint64(registry.addressCount());
+        uint64 auxData = (registryKey << 32) | funcSelector;
+        vm.expectRevert(ErrorLib.InvalidAuxData.selector);
+        bridge.convert(virtualAssetInteractionNonce, emptyAsset, virtualAsset1, emptyAsset, 0, 0, auxData, address(0));
+    }
+
+    // Success test case.
+    function testCreateAuctionSuccess() public {
+        // Deposit an NFT. 
+        depositIntoBridge(INTERACTION_NONCE, 1);
+        uint64 funcSelector = 5;
+
+        (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            virtualAsset1,
+            emptyAsset,
+            0,
+            INTERACTION_NONCE,
+            funcSelector,
+            address(0)
+        );
+
+        // Check outputs.
+        assertEq(outputValueA, 1, "Output value A is not 1");
+        assertEq(outputValueB, 0, "Output value B is not 0");
+        assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
+
+        // Check that the internal nftAssets mapping no longer has the NFT.
+        (address emptyCollection, uint256 emptyTokenId) = bridge.nftAssets(INTERACTION_NONCE);
+        assertEq(emptyCollection, address(0x0), "Unexpected collection address");
+        assertEq(emptyTokenId, 0, "Unexpected tokenId");
+
+        // Check that the auctions mapping has the NFT.
+        (address auctionCollection, uint256 auctionTokenId) = bridge.nftAuctions(INTERACTION_NONCE);
+        assertEq(auctionCollection, address(nftContract), "Unexpected collection address");
+        assertEq(auctionTokenId, 1, "Unexpected tokenId");
+    }
+
+    function depositIntoBridge(uint256 _virtualAssetId, uint256 _tokenId) internal {
+        uint64 funcSelector = 0;
+
+        // Deposit. 
+        bridge.convert(
+            ethAsset,
+            emptyAsset,
+            virtualAssetInteractionNonce,
+            emptyAsset,
+            0,                  // _totalInputValue 
+            _virtualAssetId,    // _interactionNonce 
+            funcSelector,       // auxData
+            address(0)
+        );
+
+        // Call match and pull with tokenId.
+        bridge.matchAndPull(_virtualAssetId, address(nftContract), _tokenId);
     }
 }
