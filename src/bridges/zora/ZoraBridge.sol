@@ -40,6 +40,10 @@ contract ZoraAuction {
         address _sellerFundsRecipient,
         uint256 _startTime
     ) external {}
+
+    function cancelAuction(address _tokenContract, uint256 _tokenId) external {}
+    function settleAuction(address _tokenContract, uint256 _tokenId) external {}
+    function createBid(address _tokenContract, uint256 _tokenId) external payable {}
 }
 
 contract ZoraBridge is BridgeBase {
@@ -50,9 +54,6 @@ contract ZoraBridge is BridgeBase {
 
     // Holds the VIRTUAL token -> NFT relationship.
     mapping(uint256 => NftAsset) public nftAssets;
-
-    // Holds the VIRTUAL token -> NFT auction relationship.
-    mapping(uint256 => NftAsset) public nftAuctions;
 
     error InvalidVirtualAssetId();
 
@@ -357,11 +358,119 @@ contract ZoraBridge is BridgeBase {
                 startTime
             );
 
-            // Update the asset map to correlate the new virtual token with an
-            // auctioned NFT.
-            _moveToAuction(assetId, _interactionNonce);
+            // Update the asset map to correlate new virtual token with existing
+            // bridge-owned nft.
+            _updateVirtualAssetId(assetId, _interactionNonce);
 
             // Return the virtual token.
+            return (1, 0, false);
+        } /* 
+            cancelAuction: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH#cancelauction
+          
+            _auxData = 
+                bits[0-4)   = funcSelector  [ 4 bits]
+                bits[4-63)  = unused        [60 bits]
+        */ 
+        else if (funcSelector == 6) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[_inputAssetA.id];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+
+            zAuc.cancelAuction(
+                token.collection,
+                token.tokenId
+            );
+
+            // Update the asset map to correlate new virtual token with existing
+            // bridge-owned nft.
+            _updateVirtualAssetId(_inputAssetA.id, _interactionNonce);
+
+            // Return the virtual token.
+            return (1, 0, false);
+        }
+        /* 
+            settleAuction: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH#settleauction
+          
+            _auxData = 
+                bits[0-4)   = funcSelector  [ 4 bits]
+                bits[4-63)  = unused        [60 bits]
+        */ 
+        else if (funcSelector == 7) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be ETH.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[_inputAssetA.id];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+
+            zAuc.settleAuction(
+                token.collection,
+                token.tokenId
+            );
+
+            // Delete the NFT from the mapping. If settleAuction succeeds, then
+            // that means the NFT is transferred out to the winning bid.
+            delete nftAssets[_inputAssetA.id];
+
+            return (0, 0, false);
+        }
+        /* 
+            createBid: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH#createbid
+          
+            _auxData = 
+                bits[0-4)   = funcSelector  [ 4 bits]
+                bits[4-34)  = collectionKey  [30 bits]
+                bits[34-64) = tokenId        [30 bits]
+        */ 
+        else if (funcSelector == 8) {
+            // Input type needs to be ETH.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            uint256 collectionKey = (_auxData >> 4) & MASK_30;
+            uint256 tokenId = _auxData >> 34;
+
+            address collection = registry.addresses(collectionKey);
+            if (collection == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+
+            zAuc.createBid{value: _totalInputValue}(
+                collection,
+                tokenId
+            );
+
+            // Update the mapping with the virtual token Id.
+            nftAssets[_interactionNonce] = NftAsset({
+                collection: collection,
+                tokenId: tokenId
+            });
+
+            // Return virtual asset.
             return (1, 0, false);
         } else {
             revert ErrorLib.InvalidAuxData();
@@ -384,12 +493,6 @@ contract ZoraBridge is BridgeBase {
     // Function to update the nftAssets mapping to a new virtual asset id.
     function _updateVirtualAssetId(uint256 _inputAssetId, uint256 _interactionNonce) internal {
         nftAssets[_interactionNonce] = nftAssets[_inputAssetId];
-        delete nftAssets[_inputAssetId];
-    }
-
-    // Move an NFT from the assets mapping to the auction mapping.
-    function _moveToAuction(uint256 _inputAssetId, uint256 _interactionNonce) internal {
-        nftAuctions[_interactionNonce] = nftAssets[_inputAssetId];
         delete nftAssets[_inputAssetId];
     }
 }
