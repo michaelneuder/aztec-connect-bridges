@@ -46,6 +46,17 @@ contract ZoraAuction {
     function createBid(address _tokenContract, uint256 _tokenId) external payable {}
 }
 
+// https://docs.zora.co/docs/smart-contracts/modules/Offers/zora-v3-offers-latest
+contract ZoraOffer {
+    function createOffer(
+        address _tokenContract,
+        uint256 _tokenId,
+        address _currency,
+        uint256 _amount,
+        uint16 _findersFeeBps
+    ) external returns (uint256) {}
+}
+
 contract ZoraBridge is BridgeBase {
     struct NftAsset {
         address collection;
@@ -60,6 +71,7 @@ contract ZoraBridge is BridgeBase {
     // Other contracts.
     ZoraAsk internal zAsk;
     ZoraAuction internal zAuc;
+    ZoraOffer internal zOff;
     AddressRegistry public immutable registry;
 
     // Constants
@@ -72,9 +84,10 @@ contract ZoraBridge is BridgeBase {
     uint64 internal constant WEI_PER_MICROETH = 1000 * 1000000000;
 
     // Need to pass the zora & registry addresses to construct the bridge.
-    constructor(address _rollupProcessor, address _zoraAsk, address _zoraAuction, address _registry) BridgeBase(_rollupProcessor) {
+    constructor(address _rollupProcessor, address _zoraAsk, address _zoraAuction, address _zoraOffer, address _registry) BridgeBase(_rollupProcessor) {
         zAsk = ZoraAsk(_zoraAsk);
         zAuc = ZoraAuction(_zoraAuction);
+        zOff = ZoraOffer(_zoraOffer);
         registry = AddressRegistry(_registry);
     }
 
@@ -364,7 +377,8 @@ contract ZoraBridge is BridgeBase {
 
             // Return the virtual token.
             return (1, 0, false);
-        } /* 
+        } 
+        /* 
             cancelAuction: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH#cancelauction
           
             _auxData = 
@@ -437,7 +451,7 @@ contract ZoraBridge is BridgeBase {
             createBid: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH#createbid
           
             _auxData = 
-                bits[0-4)   = funcSelector  [ 4 bits]
+                bits[0-4)   = funcSelector   [ 4 bits]
                 bits[4-34)  = collectionKey  [30 bits]
                 bits[34-64) = tokenId        [30 bits]
         */ 
@@ -462,6 +476,49 @@ contract ZoraBridge is BridgeBase {
             zAuc.createBid{value: _totalInputValue}(
                 collection,
                 tokenId
+            );
+
+            // Update the mapping with the virtual token Id.
+            nftAssets[_interactionNonce] = NftAsset({
+                collection: collection,
+                tokenId: tokenId
+            });
+
+            // Return virtual asset.
+            return (1, 0, false);
+        }
+        /* 
+            createOffer: https://docs.zora.co/docs/smart-contracts/modules/Offers/zora-v3-offers-latest#createoffer
+          
+            _auxData = 
+                bits[0-4)   = funcSelector   [ 4 bits]
+                bits[4-34)  = collectionKey  [30 bits]
+                bits[34-64) = tokenId        [30 bits]
+        */ 
+        else if (funcSelector == 9) {
+            // Input type needs to be ETH.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be VIRTUAL.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidOutputA();
+            }
+
+            uint256 collectionKey = (_auxData >> 4) & MASK_30;
+            uint256 tokenId = _auxData >> 34;
+
+            address collection = registry.addresses(collectionKey);
+            if (collection == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+
+            zOff.createOffer(
+                collection,
+                tokenId,
+                address(0x0), // ETH
+                _totalInputValue,
+                uint16(0) // finders fee.
             );
 
             // Update the mapping with the virtual token Id.
