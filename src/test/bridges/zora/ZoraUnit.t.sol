@@ -11,7 +11,6 @@ import {AddressRegistry} from "../../../bridges/registry/AddressRegistry.sol";
 import {ZoraBridge} from "../../../bridges/zora/ZoraBridge.sol";
 import {ZoraAsk} from "../../../bridges/zora/ZoraBridge.sol";
 import {ZoraAuction} from "../../../bridges/zora/ZoraBridge.sol";
-import {ZoraOffer} from "../../../bridges/zora/ZoraBridge.sol";
 
 // @notice The purpose of this test is to directly test convert functionality of the bridge.
 contract ZoraUnitTest is BridgeTestBase {
@@ -24,7 +23,6 @@ contract ZoraUnitTest is BridgeTestBase {
 
     ZoraAsk private ask;
     ZoraAuction private auction;
-    ZoraOffer private offer;
     ZoraBridge private bridge;
     AddressRegistry private registry;
     ERC721PresetMinterPauserAutoId private nftContract;
@@ -51,8 +49,7 @@ contract ZoraUnitTest is BridgeTestBase {
         registry = new AddressRegistry(rollupProcessor);
         ask = new ZoraAsk();
         auction = new ZoraAuction();
-        offer = new ZoraOffer();
-        bridge = new ZoraBridge(rollupProcessor, address(ask), address(auction), address(offer), address(registry));
+        bridge = new ZoraBridge(rollupProcessor, address(ask), address(auction), address(registry));
         
         // Set ETH balance of bridge to 50000.
         vm.deal(address(bridge), 50000);
@@ -657,68 +654,6 @@ contract ZoraUnitTest is BridgeTestBase {
     // Success test case.
     function testCreateBidSuccess() public {
         uint64 funcSelector = 8;
-        // The nftContract is registered with key=1.
-        uint64 collectionKey = 1;
-        // Construct auxData.
-        uint64 auxData = (uint64(TOKEN_ID) << 34) | (collectionKey << 4) | funcSelector;
-
-        uint256 inputValue = 2000;
-
-        (uint256 outputValueA, uint256 outputValueB, bool isAsync) = bridge.convert(
-            ethAsset,
-            emptyAsset,
-            virtualAsset1,
-            emptyAsset,
-            inputValue,
-            INTERACTION_NONCE,
-            auxData,
-            address(0x0)
-        );
-
-        // Check outputs.
-        assertEq(outputValueA, 1, "Output value A is not 1");
-        assertEq(outputValueB, 0, "Output value B is not 0");
-        assertTrue(!isAsync, "Bridge is incorrectly in an async mode");
-
-        // Check that the internal nftAssets mapping is updated.
-        (address storedCollection, uint256 storedTokenId) = bridge.nftAssets(INTERACTION_NONCE);
-        assertEq(storedCollection, address(nftContract), "Unexpected collection address");
-        assertEq(storedTokenId, TOKEN_ID, "Unexpected tokenId");
-    }
-
-    /*  
-        function       |   selector
-        --------------------------------------
-        createOffer    |   uint8(9)
-    */
-
-    // Revert test cases.
-    function testCreateOfferInvalidInputAType() public {
-        uint64 funcSelector = 9;
-        vm.expectRevert(ErrorLib.InvalidInputA.selector);
-        // Input A needs to be eth type.
-        bridge.convert(virtualAsset1, emptyAsset, virtualAsset1, emptyAsset, 0, 0, funcSelector, address(0x0));
-    }
-
-    function testCreateOfferInvalidOutputAType() public {
-        uint64 funcSelector = 9;
-        vm.expectRevert(ErrorLib.InvalidOutputA.selector);
-        // Output A needs to be virtual type.
-        bridge.convert(ethAsset, emptyAsset, ethAsset, emptyAsset, 0, 0, funcSelector, address(0x0));
-    }
-
-    function testCreateOfferCollectionAddressNotRegistered() public {
-        uint64 funcSelector = 9;
-        // This collection is out of range for the registry.
-        uint64 collectionKey = uint64(registry.addressCount());
-        uint64 auxData = (collectionKey << 4) | funcSelector;
-        vm.expectRevert(ErrorLib.InvalidAuxData.selector);
-        bridge.convert(ethAsset, emptyAsset, virtualAsset1, emptyAsset, 0, 0, auxData, address(0x0));
-    }
-
-    // Success test case.
-    function testCreateOfferSuccess() public {
-        uint64 funcSelector = 9;
         // The nftContract is registered with key=1.
         uint64 collectionKey = 1;
         // Construct auxData.
