@@ -9,7 +9,6 @@ import {AztecTypes} from "rollup-encoder/libraries/AztecTypes.sol";
 import {ZoraBridge} from "../../../bridges/zora/ZoraBridge.sol";
 import {ZoraAsk} from "../../../bridges/zora/ZoraBridge.sol";
 import {ZoraAuction} from "../../../bridges/zora/ZoraBridge.sol";
-import {ZoraOffer} from "../../../bridges/zora/ZoraBridge.sol";
 import {AddressRegistry} from "../../../bridges/registry/AddressRegistry.sol";
 import {ErrorLib} from "../../../bridges/base/ErrorLib.sol";
 import {ERC721PresetMinterPauserAutoId} from
@@ -24,7 +23,6 @@ contract ZoraBridgeE2ETest is BridgeTestBase {
     AddressRegistry private registry;
     ZoraAsk private ask;
     ZoraAuction private auction;
-    ZoraOffer private offer;
     ERC721PresetMinterPauserAutoId private nftContract;
 
     // To store the id of the bridge after being added
@@ -50,8 +48,7 @@ contract ZoraBridgeE2ETest is BridgeTestBase {
         registry = new AddressRegistry(address(ROLLUP_PROCESSOR));
         ask = new ZoraAsk();
         auction = new ZoraAuction();
-        offer = new ZoraOffer();
-        bridge = new ZoraBridge(address(ROLLUP_PROCESSOR), address(ask), address(auction), address(offer), address(registry));
+        bridge = new ZoraBridge(address(ROLLUP_PROCESSOR), address(ask), address(auction), address(registry));
 
         // Create test NFT contract and mint 2 ERC-721 tokens (tokenIds 0 & 1).
         nftContract = new ERC721PresetMinterPauserAutoId("test", "NFT", "");
