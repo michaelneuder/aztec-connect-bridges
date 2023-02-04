@@ -67,7 +67,8 @@ contract ZoraBridge is BridgeBase {
 
         struct AuctionBid {
             uint256  amount;
-            bool     ethOnly;
+            bool     withdrawEthOnly;
+            uint32   startTime;
         }
 
     // Holds the VIRTUAL token -> NFT relationship.
@@ -134,18 +135,19 @@ contract ZoraBridge is BridgeBase {
 
             Basic:
               -- deposit       funcSelector = uint8(0)
-              -- withdraw      funcSelector = uint8(1)
+              -- withdrawNft   funcSelector = uint8(1)
+              -- withdrawEth   funcSelector = uint8(2)
 
             Zora Asks: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1
-              -- createAsk     funcSelector = uint8(2)
-              -- cancelAsk     funcSelector = uint8(3)
-              -- fillAsk       funcSelector = uint8(4)
+              -- createAsk     funcSelector = uint8(3)
+              -- cancelAsk     funcSelector = uint8(4)
+              -- fillAsk       funcSelector = uint8(5)
 
             Zora Ethereum Auction: https://docs.zora.co/docs/smart-contracts/modules/ReserveAuctions/Core/zora-v3-auctions-coreETH
-              -- createAuction funcSelector = uint8(5)
-              -- cancelAuction funcSelector = uint8(6)
-              -- settleAuction funcSelector = uint8(7)
-              -- createBid     funcSelector = uint8(8)
+              -- createAuction funcSelector = uint8(6)
+              -- cancelAuction funcSelector = uint8(7)
+              -- settleAuction funcSelector = uint8(8)
+              -- createBid     funcSelector = uint8(9)
         */
 
         uint8 funcSelector = uint8(_auxData & MASK_4);
@@ -171,7 +173,7 @@ contract ZoraBridge is BridgeBase {
             return (1, 0, false);
         }
         /* 
-            withdraw
+            withdrawNft
           
             _auxData = 
                 bits[0-4)   = funcSelector  [ 4 bits]
@@ -186,34 +188,64 @@ contract ZoraBridge is BridgeBase {
             if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
                 revert ErrorLib.InvalidOutputA();
             }
-
             // Fetch the NFT details from the mapping using the virtual token id as the key.
             NftAsset memory token = nftAssets[_inputAssetA.id];
-            AuctionBid memory bid = auctionBids[_inputAssetA.id];
             if (token.collection == address(0x0)) {
                 revert ErrorLib.InvalidInputA();
             }
-
-            // No bid, just withdraw.
-            if (bid.amount == 0) {
-                address to = registry.addresses(_auxData >> 4);
-                if (to == address(0x0)) {
-                    revert ErrorLib.InvalidAuxData();
-                }
-                delete nftAssets[_inputAssetA.id];
-                IERC721(token.collection).transferFrom(address(this), to, token.tokenId);
+            // Check for the presence of a bid with withdrawEthOnly == true.
+            AuctionBid memory bid = auctionBids[_inputAssetA.id];
+            if (bid.withdrawEthOnly) {
+                revert ErrorLib.InvalidInputA();
+            }
+            address to = registry.addresses(_auxData >> 4);
+            if (to == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+            delete nftAssets[_inputAssetA.id];
+            IERC721(token.collection).transferFrom(address(this), to, token.tokenId);
+            return (0, 0, false);
                 return (0, 0, false); 
-            } 
-
-            /*
-            This virtual token maps to a bid. We need to evaluate four cases:
-                a) the auction is still live, and the bid is the highest bid. then we can't do anything so we revert
-                b) the auction is still live, but we are not the highest bid anymore, then we can refund the eth they sent us.
-                c) the auction is over and the bridge does not own the asset. then we know that we must have lost, so we can refund the eth they sent us
-                d) the auction is over, the bridge owns the nft, and the bid is not marked as ethOnly, then we know that bid mustve won, so we send the NFT to them
-            */
-
-
+            return (0, 0, false);
+        }
+        /* 
+            withdrawEth
+          
+            _auxData = 
+                bits[0-4)   = funcSelector  [ 4 bits]
+                bits[4-64)  = registryKey   [60 bits]
+        */ 
+        if (funcSelector == 2) {
+            // Input type needs to be VIRTUAL.
+            if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Output type needs to be ETH.
+            if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
+                revert ErrorLib.InvalidOutputA();
+            }
+            // Fetch the NFT details from the mapping using the virtual token id as the key.
+            NftAsset memory token = nftAssets[_inputAssetA.id];
+            if (token.collection == address(0x0)) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Fetch the bid details.
+            AuctionBid memory bid = auctionBids[_inputAssetA.id];
+            if (bid.amount == 0) {
+                revert ErrorLib.InvalidInputA();
+            }
+            // Check that the bid is no longer the highest in the auction.
+            ZoraAuction.Auction memory curAuction = zAuc.auctionForNFT[token.collection][tokenId];
+            if (bid.startTime == curAuction.startTime && bid.amount == curAuction.amount) {
+                revert ErrorLib.InvalidInputA();
+            }
+            address to = registry.addresses(_auxData >> 4);
+            if (to == address(0x0)) {
+                revert ErrorLib.InvalidAuxData();
+            }
+            delete nftAssets[_inputAssetA.id];
+            delete auctionBids[_inputAssetA.id];
+            return (bid.amount, 0, false);
         }
         /* 
             createAsk: https://docs.zora.co/docs/smart-contracts/modules/Asks/zora-v3-asks-v1.1#createask
@@ -223,7 +255,7 @@ contract ZoraBridge is BridgeBase {
                 bits[4-34)  = askPrice      [30 bits]
                 bits[34-64) = registryKey   [30 bits]
         */ 
-        else if (funcSelector == 2) {
+        else if (funcSelector == 3) {
             // Input type needs to be VIRTUAL.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
@@ -269,7 +301,7 @@ contract ZoraBridge is BridgeBase {
                 bits[0-4)   = funcSelector  [ 4 bits]
                 bits[4-64)  = unused        [60 bits]
         */ 
-        else if (funcSelector == 3) {
+        else if (funcSelector == 4) {
             // Input type needs to be VIRTUAL.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
@@ -302,7 +334,7 @@ contract ZoraBridge is BridgeBase {
                 bits[4-34)  = collectionKey  [30 bits]
                 bits[34-64) = tokenId        [30 bits]
         */ 
-        else if (funcSelector == 4) {
+        else if (funcSelector == 5) {
             // Input type needs to be ETH.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
                 revert ErrorLib.InvalidInputA();
@@ -328,6 +360,12 @@ contract ZoraBridge is BridgeBase {
                 address(0x0)      // Leave the finder address empty.
             );
 
+            // Check if the token has a bid associated with it.
+            uint256 bidVirtualToken = nftsWithBids[_collection][_tokenId];
+            if (bidVirtualToken != 0) {
+                auctionBids[bidVirtualToken].ethOnly = true;
+            }
+
             // Update the mapping with the virtual token Id.
             nftAssets[_interactionNonce] = NftAsset({
                 collection: collection,
@@ -347,7 +385,7 @@ contract ZoraBridge is BridgeBase {
                 bits[52-56) = startTime     [ 4 bits]  in hours from now. max = 2^4-1 = 15 hours
                 bits[56-63) = duration      [ 8 bits]  in 4 hour increments from now. max = 4 * 2^8-1 = 4 * 255 = 1020 hours = 42.5 days
         */ 
-        else if (funcSelector == 5) {
+        else if (funcSelector == 6) {
             // Input type needs to be VIRTUAL.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
@@ -405,7 +443,7 @@ contract ZoraBridge is BridgeBase {
                 bits[0-4)   = funcSelector  [ 4 bits]
                 bits[4-63)  = unused        [60 bits]
         */ 
-        else if (funcSelector == 6) {
+        else if (funcSelector == 7) {
             // Input type needs to be VIRTUAL.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
@@ -440,7 +478,7 @@ contract ZoraBridge is BridgeBase {
                 bits[0-4)   = funcSelector  [ 4 bits]
                 bits[4-63)  = unused        [60 bits]
         */ 
-        else if (funcSelector == 7) {
+        else if (funcSelector == 8) {
             // Input type needs to be VIRTUAL.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.VIRTUAL) {
                 revert ErrorLib.InvalidInputA();
@@ -475,7 +513,7 @@ contract ZoraBridge is BridgeBase {
                 bits[4-34)  = collectionKey  [30 bits]
                 bits[34-64) = tokenId        [30 bits]
         */ 
-        else if (funcSelector == 8) {
+        else if (funcSelector == 9) {
             // Input type needs to be ETH.
             if (_inputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
                 revert ErrorLib.InvalidInputA();
@@ -497,6 +535,12 @@ contract ZoraBridge is BridgeBase {
                 collection,
                 tokenId
             );
+
+            // Update the mapping with the virtual token Id.
+            nftAssets[_interactionNonce] = NftAsset({
+                collection: collection,
+                tokenId: tokenId
+            });
 
             // Update the auctionBids mapping.
             auctionBids[_interactionNonce] = AuctionBid({
@@ -520,6 +564,7 @@ contract ZoraBridge is BridgeBase {
         if (nftAssets[_virtualAssetId].collection != address(0x0)) {
             revert InvalidVirtualAssetId();
         }
+        // Check if the token has a bid associated with it.
         uint256 bidVirtualToken = nftsWithBids[_collection][_tokenId];
         if (bidVirtualToken != 0) {
             auctionBids[bidVirtualToken].ethOnly = true;
