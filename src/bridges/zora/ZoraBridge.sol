@@ -198,14 +198,12 @@ contract ZoraBridge is BridgeBase {
             if (bid.withdrawEthOnly) {
                 revert ErrorLib.InvalidInputA();
             }
-            address to = registry.addresses(_auxData >> 4);
-            if (to == address(0x0)) {
+            // Cannot store the address locally because of stack too deep.
+            if (registry.addresses(_auxData >> 4) == address(0x0)) {
                 revert ErrorLib.InvalidAuxData();
             }
             delete nftAssets[_inputAssetA.id];
-            IERC721(token.collection).transferFrom(address(this), to, token.tokenId);
-            return (0, 0, false);
-                return (0, 0, false); 
+            IERC721(token.collection).transferFrom(address(this), registry.addresses(_auxData >> 4), token.tokenId);
             return (0, 0, false);
         }
         /* 
@@ -224,27 +222,24 @@ contract ZoraBridge is BridgeBase {
             if (_outputAssetA.assetType != AztecTypes.AztecAssetType.ETH) {
                 revert ErrorLib.InvalidOutputA();
             }
+            uint256 inputAssetId = _inputAssetA.id;
             // Fetch the NFT details from the mapping using the virtual token id as the key.
-            NftAsset memory token = nftAssets[_inputAssetA.id];
+            NftAsset memory token = nftAssets[inputAssetId];
             if (token.collection == address(0x0)) {
                 revert ErrorLib.InvalidInputA();
             }
             // Fetch the bid details.
-            AuctionBid memory bid = auctionBids[_inputAssetA.id];
+            AuctionBid memory bid = auctionBids[inputAssetId];
             if (bid.amount == 0) {
                 revert ErrorLib.InvalidInputA();
             }
             // Check that the bid is no longer the highest in the auction.
-            ZoraAuction.Auction memory curAuction = zAuc.auctionForNFT[token.collection][tokenId];
-            if (bid.startTime == curAuction.startTime && bid.amount == curAuction.amount) {
+            (,,,,,, uint32 startTime,) = zAuc.auctionForNFT(token.collection, token.tokenId);
+            if (bid.startTime == startTime) {
                 revert ErrorLib.InvalidInputA();
             }
-            address to = registry.addresses(_auxData >> 4);
-            if (to == address(0x0)) {
-                revert ErrorLib.InvalidAuxData();
-            }
-            delete nftAssets[_inputAssetA.id];
-            delete auctionBids[_inputAssetA.id];
+            delete nftAssets[inputAssetId];
+            delete auctionBids[inputAssetId];
             return (bid.amount, 0, false);
         }
         /* 
@@ -361,9 +356,9 @@ contract ZoraBridge is BridgeBase {
             );
 
             // Check if the token has a bid associated with it.
-            uint256 bidVirtualToken = nftsWithBids[_collection][_tokenId];
+            uint256 bidVirtualToken = nftsWithBids[collection][tokenId];
             if (bidVirtualToken != 0) {
-                auctionBids[bidVirtualToken].ethOnly = true;
+                auctionBids[bidVirtualToken].withdrawEthOnly = true;
             }
 
             // Update the mapping with the virtual token Id.
@@ -542,10 +537,14 @@ contract ZoraBridge is BridgeBase {
                 tokenId: tokenId
             });
 
+            // Fetch the start time of the auction.
+            (,,,,,, uint32 startTime,) = zAuc.auctionForNFT(collection, tokenId);
+
             // Update the auctionBids mapping.
             auctionBids[_interactionNonce] = AuctionBid({
                 amount: _totalInputValue,
-                ethOnly: false
+                withdrawEthOnly: false,
+                startTime: startTime
             });
 
             // Update the inverse mapping.
@@ -567,7 +566,7 @@ contract ZoraBridge is BridgeBase {
         // Check if the token has a bid associated with it.
         uint256 bidVirtualToken = nftsWithBids[_collection][_tokenId];
         if (bidVirtualToken != 0) {
-            auctionBids[bidVirtualToken].ethOnly = true;
+            auctionBids[bidVirtualToken].withdrawEthOnly = true;
         }
         nftAssets[_virtualAssetId] = NftAsset({
             collection: _collection,
