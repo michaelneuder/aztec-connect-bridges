@@ -211,7 +211,7 @@ contract ZoraBridge is BridgeBase {
           
             _auxData = 
                 bits[0-4)   = funcSelector  [ 4 bits]
-                bits[4-64)  = registryKey   [60 bits]
+                bits[4-64)  = unused        [60 bits]
         */ 
         if (funcSelector == 2) {
             // Input type needs to be VIRTUAL.
@@ -234,8 +234,8 @@ contract ZoraBridge is BridgeBase {
                 revert ErrorLib.InvalidInputA();
             }
             // Check that the bid is no longer the highest in the auction.
-            (,,,,,, uint32 startTime,) = zAuc.auctionForNFT(token.collection, token.tokenId);
-            if (bid.startTime == startTime) {
+            (,,, uint96 highestBid,,, uint32 startTime,) = zAuc.auctionForNFT(token.collection, token.tokenId);
+            if (bid.startTime == startTime && bid.amount == highestBid) {
                 revert ErrorLib.InvalidInputA();
             }
             delete nftAssets[inputAssetId];
