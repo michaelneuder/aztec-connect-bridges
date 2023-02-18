@@ -53,7 +53,7 @@ collection and token Id of the ERC-721 token.
 - _checks_: 
   - Assert that the virtual token Id does not already correspond to an NFT in the the `nftAssets` mapping.
   - Check that the NFT being deposited does not have an outstanding bid in the bridge. If it does, then mark that bid as `withdrawEthOnly`.
-- _misc:_ The virtual token
+- _misc:_ The virtual 
 
 ### Internal data structures
 
