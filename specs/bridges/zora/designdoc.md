@@ -53,7 +53,59 @@ collection and token Id of the ERC-721 token.
 - _checks_: 
   - Assert that the virtual token Id does not already correspond to an NFT in the the `nftAssets` mapping.
   - Check that the NFT being deposited does not have an outstanding bid in the bridge. If it does, then mark that bid as `withdrawEthOnly`.
-- _misc:_ The virtual token
+- _misc:_
+  - The second check above is needed to avoid multiple virtual tokens being able to withdraw the NFT from the bridge. If there is an outstanding bid for the NFT, then by definition, the bid must have lost the auction on Zora, so marking the bid as `withdrawEthOnly` ensures that the owner of that bid is only able to withdraw the ETH that they used for the bid rather than the NFT.
+
+#### withdrawNft -> funcSelector = 1
+
+- _purpose:_ allows the users to withdraw ERC-721 tokens from the bridge. 
+- _inputs:_ 
+  - `_inputAssetA      : AztecTypes.AztecAssetType.VIRTUAL`
+  - `_outputAssetA     : AztecTypes.AztecAssetType.ETH`
+  - `_totalInputValue  : not used`
+  - `_interactionNonce : not used`
+  - `_auxData          : bits[4-64) = registryKey`
+- _description:_ The user calls tihs function with a virtual token that corresponds to an NFT in the bridge. They are then allowed to withdraw it to an address stored in the address registry. 
+- _state modification:_ The `nftAssets` entry is deleted if the token is succesfully transfered.
+- _token transfers:_  the ERC-721 token is transferred from the bridge to the address fetched from the address registry.
+- _checks_: 
+  - Assert that the virtual token Id corresponds to an NFT in the the `nftAssets` mapping.
+  - Check that the NFT being withdrawn does not have an outstanding bid that is marked as `withdrawEthOnly` in the bridge.
+- _misc:_
+  - The second check above is to make sure that this virtual token is the true owner of the NFT.
+
+#### withdrawEth -> funcSelector = 2
+
+- _purpose:_ allows the users to withdraw ETH from the bridge due to a losing auction bid.
+- _inputs:_ 
+  - `_inputAssetA      : AztecTypes.AztecAssetType.VIRTUAL`
+  - `_outputAssetA     : AztecTypes.AztecAssetType.ETH`
+  - `_totalInputValue  : not used`
+  - `_interactionNonce : not used`
+  - `_auxData          : not used`
+- _description:_ The function first fetches the NFT details corresponding to the virtual token from `nftAssets`. Then it fetches the bid details from `auctionBids`. Using these two pieces of data it checks the `ZoraAuctions` contract for an existing auction on that NFT. If the auction is still running, and this bid is still the max bid, don't let the withdrawl proceed. Otherwise, allow them to withdraw the ETH.
+- _state modification:_ In `matchAndPull`, the `nftAssets` mapping is updated with the virtual asset tokenId (which is the `_interactionNonce`) to map the 
+collection and token Id of the ERC-721 token.
+- _token transfers:_ ETH is returned in the `_outputValueA`.
+- _checks_: 
+  - Assert that the virtual token Id corresponds to a NFT in `nftAssets`.
+  - Assert that the virtual token Id corresponds to a bid in `nftBids`.
+  - Assert that the bid is no longer the max bid on the auction.
+- _misc:_
+  - The third check above is needed to make sure the user isn't withdrawing ETH from a currently running auction.
+
+
+#### createAsk -> funcSelector = 3
+
+- _purpose:_ allows the users to create an Ask on the Zora contract. 
+- _inputs:_ 
+  - `_inputAssetA      : AztecTypes.AztecAssetType.VIRTUAL`
+  - `_outputAssetA     : AztecTypes.AztecAssetType.VIRTUAL`
+  - `_totalInputValue  : not used`
+  - `_interactionNonce : tokenId of returned virtual token`
+  - `_auxData          : bits[4-34) = askPrice, bits[34-64) = registryKey`
+- _description:_ The NFT which the ask is being created for must be owned by the bridge. The user specifies a recipient for the seller funds as well as an ask price by using the aux data. 
+
 
 ### Internal data structures
 
