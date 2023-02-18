@@ -53,7 +53,8 @@ collection and token Id of the ERC-721 token.
 - _checks_: 
   - Assert that the virtual token Id does not already correspond to an NFT in the the `nftAssets` mapping.
   - Check that the NFT being deposited does not have an outstanding bid in the bridge. If it does, then mark that bid as `withdrawEthOnly`.
-- _misc:_ The virtual 
+- _misc:_
+  - The second check above is needed to avoid multiple virtual tokens being able to withdraw the NFT from the bridge. If there is an outstanding bid for the NFT, then by definition, the bid must have lost the auction on Zora, so marking the bid as `withdrawEthOnly` ensures that the owner of that bid is only able to withdraw the ETH that they used for the bid rather than the NFT.
 
 ### Internal data structures
 
